@@ -1,13 +1,13 @@
 import os
 import sys
 import argparse
+from datetime import datetime
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from models.clip_model import CLIPModel
 from dataloaders import ImageRetrievalDataModule
 from pytorch_lightning import Trainer
-from pytorch_lightning.callbacks import Callback
 from pytorch_lightning.loggers import WandbLogger, CSVLogger
 from pytorch_lightning.callbacks.lr_monitor import LearningRateMonitor
 from pytorch_lightning.callbacks.model_checkpoint import ModelCheckpoint
@@ -18,11 +18,26 @@ TEXT_ENCODER_ALIAS  = "distilbert-base-uncased"
 DATASET_NAME        = "flickr8k"
 
 
-def build_logger(logger_type: str):
+class ExperimentModelCheckpoint(ModelCheckpoint):
+    """ModelCheckpoint que, al eliminar un checkpoint, borra también su subcarpeta si queda vacía."""
+
+    def _remove_checkpoint(self, trainer, filepath):
+        super()._remove_checkpoint(trainer, filepath)
+        folder = os.path.dirname(filepath)
+        if (
+            folder
+            and os.path.normpath(folder) != os.path.normpath(self.dirpath or "")
+            and os.path.isdir(folder)
+            and not os.listdir(folder)
+        ):
+            os.rmdir(folder)
+
+
+def build_logger(logger_type: str, run_name: str):
     if logger_type == "wandb":
-        return WandbLogger(project="CLIP", log_model="all")
+        return WandbLogger(project="CLIP", name=run_name, log_model="all")
     if logger_type == "csv":
-        return CSVLogger(save_dir="logs", name="CLIP")
+        return CSVLogger(save_dir="logs", name=run_name)
     raise ValueError(f"Unknown logger type: {logger_type!r} (use 'wandb' or 'csv')")
 
 
@@ -38,6 +53,9 @@ def main():
     parser.add_argument("--accelerator", default="gpu")
     args = parser.parse_args()
 
+    timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+    experiment_name = f"CLIP-{timestamp}"
+
     model = CLIPModel(IMAGE_ENCODER_ALIAS, TEXT_ENCODER_ALIAS)
     data_module = ImageRetrievalDataModule(
         dataset_path="datasets/flickr8k",
@@ -46,14 +64,15 @@ def main():
         lazy_loading=True,
     )
 
-    logger = build_logger(args.logger)
+    logger = build_logger(args.logger, experiment_name)
 
-    model_checkpoint = ModelCheckpoint(
-        dirpath=CHECKPOINTS_DIR,
-        filename="clip-{epoch:02d}-{val/loss:.2f}",
+    model_checkpoint = ExperimentModelCheckpoint(
+        dirpath=os.path.join(CHECKPOINTS_DIR, experiment_name),
+        filename="epoch_{epoch:02d}_val_loss_{val/loss:.4f}/model",
+        auto_insert_metric_name=False,
         monitor="val/loss",
         mode="min",
-        save_top_k=1,
+        save_top_k=2,
         save_last=True,
     )
     lr_monitor = LearningRateMonitor(logging_interval="step")

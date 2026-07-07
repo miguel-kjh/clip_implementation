@@ -18,17 +18,6 @@ TEXT_ENCODER_ALIAS  = "distilbert-base-uncased"
 DATASET_NAME        = "flickr8k"
 
 
-class ConsoleMetricsLogger(Callback):
-    """Imprime en consola las métricas de cada época (funciona con cualquier logger)."""
-
-    def on_validation_epoch_end(self, trainer, pl_module):
-        if trainer.sanity_checking:
-            return
-        metrics = {k: float(v) for k, v in trainer.callback_metrics.items()}
-        line = " | ".join(f"{k}={v:.4f}" for k, v in metrics.items())
-        print(f"[epoch {trainer.current_epoch}] {line}")
-
-
 def build_logger(logger_type: str):
     if logger_type == "wandb":
         return WandbLogger(project="CLIP", log_model="all")
@@ -74,7 +63,7 @@ def main():
         logger=logger,
         max_epochs=args.max_epochs,
         log_every_n_steps=1,
-        callbacks=[model_checkpoint, lr_monitor, ConsoleMetricsLogger()],
+        callbacks=[model_checkpoint, lr_monitor],
     )
     trainer.fit(model, data_module)
 

@@ -11,14 +11,14 @@ from torch.utils.data import Dataset
 class ImageRetrievalDataset(Dataset):
     def __init__(
         self,
-        artifact_id: str,
+        dataset_path: str,
         tokenizer=None,
         target_size: Optional[int] = None,
         max_length: int = 200,
         lazy_loading: bool = False,
     ) -> None:
         super().__init__()
-        self.artifact_id = artifact_id
+        self.dataset_path = dataset_path
         self.target_size = target_size
         self.image_files, self.captions = self.fetch_dataset()
         self.lazy_loading = lazy_loading

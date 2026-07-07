@@ -18,7 +18,7 @@ DATASET_LOOKUP = {
 class ImageRetrievalDataModule(LightningDataModule):
     def __init__(
         self,
-        artifact_id: str,
+        dataset_path: str,
         dataset_name: str,
         val_split: float = 0.2,
         tokenizer_alias: Optional[str] = None,
@@ -31,7 +31,7 @@ class ImageRetrievalDataModule(LightningDataModule):
         **kwargs
     ):
         super().__init__(**kwargs)
-        self.artifact_id = artifact_id
+        self.dataset_path = dataset_path
         self.dataset_name = dataset_name
         self.val_split = val_split
         self.tokenizer = AutoTokenizer.from_pretrained(tokenizer_alias)
@@ -56,7 +56,7 @@ class ImageRetrievalDataModule(LightningDataModule):
         stage: Optional[str] = None,
     ) -> None:
         dataset = DATASET_LOOKUP[self.dataset_name](
-            artifact_id=self.artifact_id,
+            dataset_path=self.dataset_path,
             tokenizer=self.tokenizer,
             target_size=self.target_size,
             max_length=self.max_length,

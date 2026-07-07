@@ -134,13 +134,13 @@ class CLIPModel(LightningModule):
         image_embeddings, text_embeddings = self.forward(batch)
         loss = self._compute_losses(image_embeddings, text_embeddings).mean()
         train_loss = self.all_gather(loss)
-        self.log("train/loss", train_loss.mean())
-        self.log("train/logit_scale", self.logit_scale.exp())
+        self.log("train/loss", train_loss.mean(), prog_bar=True)
+        self.log("train/logit_scale", self.logit_scale.exp(), prog_bar=True)
         return loss
 
     def validation_step(self, batch, *args, **kwargs):
         image_embeddings, text_embeddings = self.forward(batch)
         loss = self._compute_losses(image_embeddings, text_embeddings).mean()
         val_loss = self.all_gather(loss)
-        self.log("val/loss", val_loss.mean())
+        self.log("val/loss", val_loss.mean(), prog_bar=True)
         return loss

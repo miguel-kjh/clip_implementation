@@ -1,0 +1,146 @@
+import itertools
+
+import numpy as np
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+import torch.optim as optim
+from pytorch_lightning import LightningModule
+
+from .encoders import ImageEncoder, TextEncoder
+from .embeddings_connectors.text2Vision_embeddings_conector import Text2VisionEmbeddingsConnector
+
+
+class CLIPModel(LightningModule):
+    def __init__(
+        self,
+        image_encoder_alias: str,
+        text_encoder_alias: str,
+        image_encoder_pretrained: bool = True,
+        image_encoder_trainable: bool = True,
+        text_encoder_trainable: bool = True,
+        image_embedding_dims: int = 2048,
+        text_embedding_dims: int = 768,
+        projection_dims: int = 256,
+        dropout: float = 0.0,
+        temperature: float = 1.0,
+        max_temperature: float = 100.0,
+        weight_decay: float = 0.0,
+        head_lr: float = 1e-3,
+        image_encoder_lr: float = 1e-4,
+        text_encoder_lr: float = 1e-5,
+        lr_scheduler_patience: float = 1.0,
+        lr_scheduler_factor: float = 0.8,
+        *args,
+        **kwargs,
+    ) -> None:
+        super().__init__(*args, **kwargs)
+        self.image_encoder = ImageEncoder(
+            model_name=image_encoder_alias,
+            pretrained=image_encoder_pretrained,
+            trainable=image_encoder_trainable,
+        )
+        self.text_encoder = TextEncoder(
+            model_name=text_encoder_alias, trainable=text_encoder_trainable
+        )
+        self.image_projection = Text2VisionEmbeddingsConnector(
+            embedding_dim=image_embedding_dims,
+            projection_dim=projection_dims,
+            dropout=dropout,
+        )
+        self.text_projection = Text2VisionEmbeddingsConnector(
+            embedding_dim=text_embedding_dims,
+            projection_dim=projection_dims,
+            dropout=dropout,
+        )
+        self.log_softmax = nn.LogSoftmax(dim=-1)
+
+        # Temperatura entrenable, parametrizada en espacio log (como en CLIP original).
+        # logit_scale = log(1 / temperature_inicial). Al hacer exp() en forward
+        # recuperamos 1/temperature, que multiplica a los logits.
+        self.logit_scale = nn.Parameter(torch.ones([]) * np.log(1 / temperature))
+        self.max_logit_scale = np.log(max_temperature)
+
+        self.weight_decay = weight_decay
+        self.head_lr = head_lr
+        self.image_encoder_lr = image_encoder_lr
+        self.text_encoder_lr = text_encoder_lr
+        self.lr_scheduler_patience = lr_scheduler_patience
+        self.lr_scheduler_factor = lr_scheduler_factor
+
+        self.save_hyperparameters()
+
+    def _compute_losses(self, image_embeddings, text_embeddings):
+        logit_scale = self.logit_scale.exp()
+
+        logits = (text_embeddings @ image_embeddings.T) * logit_scale
+        images_similarity = image_embeddings @ image_embeddings.T
+        texts_similarity = text_embeddings @ text_embeddings.T
+        targets = F.softmax(
+            (images_similarity + texts_similarity) / 2 * (1 / logit_scale), dim=-1
+        )
+        images_loss = (-targets.T * self.log_softmax(logits.T)).sum(1)
+        texts_loss = (-targets * self.log_softmax(logits)).sum(1)
+        return (images_loss + texts_loss) / 2.0
+
+    def forward(self, inputs):
+        image_features = self.image_encoder(inputs["image"])
+        text_features = self.text_encoder(
+            input_ids=inputs["input_ids"], attention_mask=inputs["attention_mask"]
+        )
+
+        image_embeddings = self.image_projection(image_features)
+        text_embeddings = self.text_projection(text_features)
+
+        return image_embeddings, text_embeddings
+
+    def configure_optimizers(self):
+        parameters = [
+            {"params": self.image_encoder.parameters(), "lr": self.image_encoder_lr},
+            {"params": self.text_encoder.parameters(), "lr": self.text_encoder_lr},
+            {
+                "params": itertools.chain(
+                    self.image_projection.parameters(),
+                    self.text_projection.parameters(),
+                ),
+                "lr": self.head_lr,
+                "weight_decay": self.weight_decay,
+            },
+            {
+                "params": [self.logit_scale],
+                "lr": self.head_lr,
+                "weight_decay": 0.0,
+            },
+        ]
+        optimizer = optim.Adam(parameters, weight_decay=self.weight_decay)
+        lr_scheduler = optim.lr_scheduler.ReduceLROnPlateau(
+            optimizer,
+            mode="min",
+            patience=self.lr_scheduler_patience,
+            factor=self.lr_scheduler_factor,
+        )
+        return {
+            "optimizer": optimizer,
+            "lr_scheduler": lr_scheduler,
+            "monitor": "val/loss",
+        }
+
+    def on_train_batch_end(self, outputs, batch, batch_idx):
+        # Evita que logit_scale crezca sin control (equivalente al clamp de CLIP original: temperature >= 1/max_temperature).
+        with torch.no_grad():
+            self.logit_scale.clamp_(0, self.max_logit_scale)
+
+    def training_step(self, batch, *args, **kwargs):
+        image_embeddings, text_embeddings = self.forward(batch)
+        loss = self._compute_losses(image_embeddings, text_embeddings).mean()
+        train_loss = self.all_gather(loss)
+        self.log("train/loss", train_loss.mean())
+        self.log("train/logit_scale", self.logit_scale.exp())
+        return loss
+
+    def validation_step(self, batch, *args, **kwargs):
+        image_embeddings, text_embeddings = self.forward(batch)
+        loss = self._compute_losses(image_embeddings, text_embeddings).mean()
+        val_loss = self.all_gather(loss)
+        self.log("val/loss", val_loss.mean())
+        return loss

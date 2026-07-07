@@ -2,7 +2,7 @@ import torch
 from torch import nn
 
 
-class Text2VisionEmbeddingsConnector(nn.Module):
+class MLPEmbeddingsConnector(nn.Module):
     def __init__(self, embedding_dim: int, projection_dim: int, dropout: float) -> None:
         super().__init__()
 

@@ -8,7 +8,7 @@ import torch.optim as optim
 from pytorch_lightning import LightningModule
 
 from .encoders import ImageEncoder, TextEncoder
-from .embeddings_connectors.text2Vision_embeddings_conector import Text2VisionEmbeddingsConnector
+from .embeddings_connectors.embeddings_conector import MLPEmbeddingsConnector
 
 
 class CLIPModel(LightningModule):
@@ -43,12 +43,12 @@ class CLIPModel(LightningModule):
         self.text_encoder = TextEncoder(
             model_name=text_encoder_alias, trainable=text_encoder_trainable
         )
-        self.image_projection = Text2VisionEmbeddingsConnector(
+        self.image_projection = MLPEmbeddingsConnector(
             embedding_dim=image_embedding_dims,
             projection_dim=projection_dims,
             dropout=dropout,
         )
-        self.text_projection = Text2VisionEmbeddingsConnector(
+        self.text_projection = MLPEmbeddingsConnector(
             embedding_dim=text_embedding_dims,
             projection_dim=projection_dims,
             dropout=dropout,

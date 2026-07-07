@@ -24,7 +24,6 @@ class CLIPModel(LightningModule):
         projection_dims: int = 256,
         dropout: float = 0.0,
         temperature: float = 1.0,
-        max_temperature: float = 100.0,
         weight_decay: float = 0.0,
         head_lr: float = 1e-3,
         image_encoder_lr: float = 1e-4,
@@ -54,12 +53,7 @@ class CLIPModel(LightningModule):
             dropout=dropout,
         )
         self.log_softmax = nn.LogSoftmax(dim=-1)
-
-        # Temperatura entrenable, parametrizada en espacio log (como en CLIP original).
-        # logit_scale = log(1 / temperature_inicial). Al hacer exp() en forward
-        # recuperamos 1/temperature, que multiplica a los logits.
-        self.logit_scale = nn.Parameter(torch.ones([]) * np.log(1 / temperature))
-        self.max_logit_scale = np.log(max_temperature)
+        self.temperature = temperature
 
         self.weight_decay = weight_decay
         self.head_lr = head_lr
@@ -71,13 +65,11 @@ class CLIPModel(LightningModule):
         self.save_hyperparameters()
 
     def _compute_losses(self, image_embeddings, text_embeddings):
-        logit_scale = self.logit_scale.exp()
-
-        logits = (text_embeddings @ image_embeddings.T) * logit_scale
+        logits = (text_embeddings @ image_embeddings.T) / self.temperature
         images_similarity = image_embeddings @ image_embeddings.T
         texts_similarity = text_embeddings @ text_embeddings.T
         targets = F.softmax(
-            (images_similarity + texts_similarity) / 2 * (1 / logit_scale), dim=-1
+            (images_similarity + texts_similarity) / 2 * self.temperature, dim=-1
         )
         images_loss = (-targets.T * self.log_softmax(logits.T)).sum(1)
         texts_loss = (-targets * self.log_softmax(logits)).sum(1)
@@ -106,11 +98,6 @@ class CLIPModel(LightningModule):
                 "lr": self.head_lr,
                 "weight_decay": self.weight_decay,
             },
-            {
-                "params": [self.logit_scale],
-                "lr": self.head_lr,
-                "weight_decay": 0.0,
-            },
         ]
         optimizer = optim.Adam(parameters, weight_decay=self.weight_decay)
         lr_scheduler = optim.lr_scheduler.ReduceLROnPlateau(
@@ -125,17 +112,11 @@ class CLIPModel(LightningModule):
             "monitor": "val/loss",
         }
 
-    def on_train_batch_end(self, outputs, batch, batch_idx):
-        # Evita que logit_scale crezca sin control (equivalente al clamp de CLIP original: temperature >= 1/max_temperature).
-        with torch.no_grad():
-            self.logit_scale.clamp_(0, self.max_logit_scale)
-
     def training_step(self, batch, *args, **kwargs):
         image_embeddings, text_embeddings = self.forward(batch)
         loss = self._compute_losses(image_embeddings, text_embeddings).mean()
         train_loss = self.all_gather(loss)
         self.log("train/loss", train_loss.mean(), prog_bar=True)
-        self.log("train/logit_scale", self.logit_scale.exp(), prog_bar=True)
         return loss
 
     def validation_step(self, batch, *args, **kwargs):

@@ -1,17 +1,12 @@
-import itertools
-
-import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import torch.optim as optim
-from pytorch_lightning import LightningModule
 
 from .encoders import ImageEncoder, TextEncoder
 from .embeddings_connectors.embeddings_conector import MLPEmbeddingsConnector
 
 
-class CLIPModel(LightningModule):
+class CLIPModel(nn.Module):
     def __init__(
         self,
         image_encoder_alias: str,
@@ -24,16 +19,8 @@ class CLIPModel(LightningModule):
         projection_dims: int = 256,
         dropout: float = 0.0,
         temperature: float = 1.0,
-        weight_decay: float = 0.0,
-        head_lr: float = 1e-3,
-        image_encoder_lr: float = 1e-4,
-        text_encoder_lr: float = 1e-5,
-        lr_scheduler_patience: float = 1.0,
-        lr_scheduler_factor: float = 0.8,
-        *args,
-        **kwargs,
     ) -> None:
-        super().__init__(*args, **kwargs)
+        super().__init__()
         self.image_encoder = ImageEncoder(
             model_name=image_encoder_alias,
             pretrained=image_encoder_pretrained,
@@ -55,15 +42,6 @@ class CLIPModel(LightningModule):
         self.log_softmax = nn.LogSoftmax(dim=-1)
         self.temperature = temperature
 
-        self.weight_decay = weight_decay
-        self.head_lr = head_lr
-        self.image_encoder_lr = image_encoder_lr
-        self.text_encoder_lr = text_encoder_lr
-        self.lr_scheduler_patience = lr_scheduler_patience
-        self.lr_scheduler_factor = lr_scheduler_factor
-
-        self.save_hyperparameters()
-
     def _compute_losses(self, image_embeddings, text_embeddings):
         logits = (text_embeddings @ image_embeddings.T) / self.temperature
         images_similarity = image_embeddings @ image_embeddings.T
@@ -75,53 +53,14 @@ class CLIPModel(LightningModule):
         texts_loss = (-targets * self.log_softmax(logits)).sum(1)
         return (images_loss + texts_loss) / 2.0
 
-    def forward(self, inputs):
-        image_features = self.image_encoder(inputs["image"])
+    def forward(self, batch):
+        image_features = self.image_encoder(batch["image"])
         text_features = self.text_encoder(
-            input_ids=inputs["input_ids"], attention_mask=inputs["attention_mask"]
+            input_ids=batch["input_ids"], attention_mask=batch["attention_mask"]
         )
 
         image_embeddings = self.image_projection(image_features)
         text_embeddings = self.text_projection(text_features)
 
-        return image_embeddings, text_embeddings
-
-    def configure_optimizers(self):
-        parameters = [
-            {"params": self.image_encoder.parameters(), "lr": self.image_encoder_lr},
-            {"params": self.text_encoder.parameters(), "lr": self.text_encoder_lr},
-            {
-                "params": itertools.chain(
-                    self.image_projection.parameters(),
-                    self.text_projection.parameters(),
-                ),
-                "lr": self.head_lr,
-                "weight_decay": self.weight_decay,
-            },
-        ]
-        optimizer = optim.Adam(parameters, weight_decay=self.weight_decay)
-        lr_scheduler = optim.lr_scheduler.ReduceLROnPlateau(
-            optimizer,
-            mode="min",
-            patience=self.lr_scheduler_patience,
-            factor=self.lr_scheduler_factor,
-        )
-        return {
-            "optimizer": optimizer,
-            "lr_scheduler": lr_scheduler,
-            "monitor": "val/loss",
-        }
-
-    def training_step(self, batch, *args, **kwargs):
-        image_embeddings, text_embeddings = self.forward(batch)
-        loss = self._compute_losses(image_embeddings, text_embeddings).mean()
-        self.log("train/loss", loss, prog_bar=True,
-                batch_size=batch["image"].size(0))
-        return loss
-
-    def validation_step(self, batch, *args, **kwargs):
-        image_embeddings, text_embeddings = self.forward(batch)
-        loss = self._compute_losses(image_embeddings, text_embeddings).mean()
-        self.log("val/loss", loss, prog_bar=True,
-                batch_size=batch["image"].size(0))
-        return loss
+        loss = self._compute_losses(image_embeddings, text_embeddings)
+        return loss.mean()

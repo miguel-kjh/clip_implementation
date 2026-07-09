@@ -22,6 +22,19 @@ DATASET_LOOKUP = {
     "flickr30k": Flickr30kDataset,
 }
 
+def seed_everything(seed=42):
+    import random
+    import numpy as np
+
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
+
+    print(f"Random seed set to: {seed}")
+
 
 class AvgMeter:
     def __init__(self, name="Metric"):
@@ -121,8 +134,10 @@ def main():
     parser.add_argument("--patience", type=int, default=1)
     parser.add_argument("--factor", type=float, default=0.8)
     parser.add_argument("--output", default="best.pt")
+    parser.add_argument("--seed", type=int, default=42)
     args = parser.parse_args()
 
+    seed_everything(args.seed)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     tokenizer = AutoTokenizer.from_pretrained(TEXT_ENCODER_ALIAS)

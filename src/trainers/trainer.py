@@ -2,6 +2,7 @@ import os
 import sys
 import argparse
 import itertools
+from datetime import datetime
 
 import torch
 from torch.utils.data import DataLoader, random_split
@@ -56,6 +57,25 @@ class AvgMeter:
 def get_lr(optimizer):
     for param_group in optimizer.param_groups:
         return param_group["lr"]
+
+
+def build_experiment_dir(args):
+    # Aliases like "distilbert-base-uncased" may be namespaced ("org/model"),
+    # which would otherwise be read as a nested path.
+    image_alias = IMAGE_ENCODER_ALIAS.replace("/", "-")
+    text_alias = TEXT_ENCODER_ALIAS.replace("/", "-")
+    timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+
+    experiment_name = (
+        f"{image_alias}_{text_alias}"
+        f"_bs{args.batch_size}"
+        f"_ep{args.epochs}"
+        f"_{args.dataset_name}"
+        f"_{timestamp}"
+    )
+    experiment_dir = os.path.join(args.output_dir, experiment_name)
+    os.makedirs(experiment_dir, exist_ok=True)
+    return experiment_dir
 
 
 def build_loaders(args, tokenizer):
@@ -133,12 +153,17 @@ def main():
     parser.add_argument("--weight-decay", type=float, default=1e-3)
     parser.add_argument("--patience", type=int, default=1)
     parser.add_argument("--factor", type=float, default=0.8)
+    parser.add_argument("--output-dir", default="checkpoints")
     parser.add_argument("--output", default="best.pt")
     parser.add_argument("--seed", type=int, default=42)
     args = parser.parse_args()
 
     seed_everything(args.seed)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+    experiment_dir = build_experiment_dir(args)
+    checkpoint_path = os.path.join(experiment_dir, args.output)
+    print(f"Experiment directory: {experiment_dir}")
 
     tokenizer = AutoTokenizer.from_pretrained(TEXT_ENCODER_ALIAS)
     train_loader, valid_loader = build_loaders(args, tokenizer)
@@ -173,8 +198,8 @@ def main():
 
         if valid_loss.avg < best_loss:
             best_loss = valid_loss.avg
-            torch.save(model.state_dict(), args.output)
-            print("Saved Best Model!")
+            torch.save(model.state_dict(), checkpoint_path)
+            print(f"Saved Best Model to {checkpoint_path}!")
 
         lr_scheduler.step(valid_loss.avg)
 

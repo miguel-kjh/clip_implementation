@@ -82,14 +82,21 @@ class CLIPModel(nn.Module):
         texts_loss = (-targets * self.log_softmax(logits)).sum(1)
         return (images_loss + texts_loss) / 2.0
 
-    def forward(self, batch):
-        image_features = self.image_encoder(batch["image"])
-        text_features = self.text_encoder(
-            input_ids=batch["input_ids"], attention_mask=batch["attention_mask"]
+    def encode_image(self, images):
+        """Embeddings de imagen en el espacio compartido. Sin normalizar L2."""
+        return self.image_projection(self.image_encoder(images))
+
+    def encode_text(self, input_ids, attention_mask):
+        """Embeddings de texto en el espacio compartido. Sin normalizar L2."""
+        return self.text_projection(
+            self.text_encoder(input_ids=input_ids, attention_mask=attention_mask)
         )
 
-        image_embeddings = self.image_projection(image_features)
-        text_embeddings = self.text_projection(text_features)
+    def forward(self, batch):
+        image_embeddings = self.encode_image(batch["image"])
+        text_embeddings = self.encode_text(
+            input_ids=batch["input_ids"], attention_mask=batch["attention_mask"]
+        )
 
         loss = self._compute_losses(image_embeddings, text_embeddings)
         return loss.mean()

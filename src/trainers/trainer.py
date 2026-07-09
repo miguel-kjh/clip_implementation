@@ -12,6 +12,7 @@ from tqdm import tqdm
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from models.clip_model import CLIPModel
+from models.checkpoint import save_hparams
 from models.embeddings_connectors import CONNECTOR_LOOKUP
 from dataloaders.flickr import Flickr8kDataset, Flickr30kDataset
 
@@ -78,6 +79,43 @@ def build_experiment_dir(args):
     experiment_dir = os.path.join(args.output_dir, experiment_name)
     os.makedirs(experiment_dir, exist_ok=True)
     return experiment_dir
+
+
+def build_model_hparams(args):
+    """Argumentos con los que se construye el CLIPModel. Se guardan tal cual para
+    poder reconstruirlo desde el checkpoint (ver models/checkpoint.py)."""
+    return {
+        "image_encoder_alias": IMAGE_ENCODER_ALIAS,
+        "text_encoder_alias": TEXT_ENCODER_ALIAS,
+        "image_connector": args.image_connector,
+        "text_connector": args.text_connector,
+        "projection_dims": args.projection_dims,
+        "dropout": args.dropout,
+        "temperature": args.temperature,
+    }
+
+
+def build_hparams(args, model_hparams):
+    return {
+        "model": model_hparams,
+        "data": {
+            "dataset_name": args.dataset_name,
+            "dataset_path": args.dataset_path,
+            "size": args.size,
+            "max_length": args.max_length,
+            "val_split": args.val_split,
+        },
+        "training": {
+            "epochs": args.epochs,
+            "batch_size": args.batch_size,
+            "head_lr": args.head_lr,
+            "image_encoder_lr": args.image_encoder_lr,
+            "text_encoder_lr": args.text_encoder_lr,
+            "weight_decay": args.weight_decay,
+            "seed": args.seed,
+            "checkpoint": args.output,
+        },
+    }
 
 
 def build_loaders(args, tokenizer):
@@ -151,6 +189,10 @@ def main():
     parser.add_argument("--max-length", type=int, default=200)
     parser.add_argument("--image-connector", choices=list(CONNECTOR_LOOKUP), default="mlp")
     parser.add_argument("--text-connector", choices=list(CONNECTOR_LOOKUP), default="mlp")
+    parser.add_argument("--projection-dims", type=int, default=256)
+    # Ojo: con dropout=0 los embeddings colapsan (loss se clava en ln(batch_size)).
+    parser.add_argument("--dropout", type=float, default=0.1)
+    parser.add_argument("--temperature", type=float, default=1.0)
     parser.add_argument("--head-lr", type=float, default=1e-3)
     parser.add_argument("--image-encoder-lr", type=float, default=1e-4)
     parser.add_argument("--text-encoder-lr", type=float, default=1e-5)
@@ -169,15 +211,14 @@ def main():
     checkpoint_path = os.path.join(experiment_dir, args.output)
     print(f"Experiment directory: {experiment_dir}")
 
+    model_hparams = build_model_hparams(args)
+    # Al empezar, no al terminar: así un run interrumpido sigue siendo legible.
+    save_hparams(experiment_dir, build_hparams(args, model_hparams))
+
     tokenizer = AutoTokenizer.from_pretrained(TEXT_ENCODER_ALIAS)
     train_loader, valid_loader = build_loaders(args, tokenizer)
 
-    model = CLIPModel(
-        IMAGE_ENCODER_ALIAS,
-        TEXT_ENCODER_ALIAS,
-        image_connector=args.image_connector,
-        text_connector=args.text_connector,
-    ).to(device)
+    model = CLIPModel(**model_hparams).to(device)
     params = [
         {"params": model.image_encoder.parameters(), "lr": args.image_encoder_lr},
         {"params": model.text_encoder.parameters(), "lr": args.text_encoder_lr},

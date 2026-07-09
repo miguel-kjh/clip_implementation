@@ -24,9 +24,18 @@ Training is a standalone script under `src/trainers/`. It adds `src/` to `sys.pa
 python src/trainers/trainer.py --dataset-name flickr8k --dataset-path datasets/flickr8k
 ```
 
-Key flags (see `main()` in `src/trainers/trainer.py` for the full list): `--dataset-name` (`flickr8k`/`flickr30k`), `--dataset-path` (local dir), `--epochs`, `--batch-size`, `--size` (image resize), `--max-length` (caption tokens), and three separate learning rates: `--image-encoder-lr`, `--text-encoder-lr`, `--head-lr`. The best checkpoint (lowest val loss) is saved via `torch.save(state_dict)` to `--output` (default `best.pt`).
+Key flags (see `main()` in `src/trainers/trainer.py` for the full list): `--dataset-name` (`flickr8k`/`flickr30k`), `--dataset-path` (local dir), `--epochs`, `--batch-size`, `--size` (image resize), `--max-length` (caption tokens), `--image-connector`/`--text-connector`, and three separate learning rates: `--image-encoder-lr`, `--text-encoder-lr`, `--head-lr`. The best checkpoint (lowest val loss) is saved to `--output-dir/<experimento>/--output` (default `checkpoints/<experimento>/best.pt`).
 
 The image/text encoder **aliases are hardcoded** at the top of `trainer.py` (`IMAGE_ENCODER_ALIAS = "resnet50"`, `TEXT_ENCODER_ALIAS = "distilbert-base-uncased"`), not exposed as CLI flags. Change them there.
+
+### Checkpoints (`checkpoints/<experimento>/`)
+
+Each run writes an experiment dir containing:
+
+- `hparams.json` — written **at the start** of the run (so an interrupted run stays readable) by `save_hparams` in `src/models/checkpoint.py`. Three sections; only `model` is needed to rebuild the net, and it is exactly the kwargs `trainer.py` passes to `CLIPModel(**model_hparams)` (`build_model_hparams`), so the two cannot drift.
+- `best.pt` — the lowest-val-loss `state_dict` (`torch.save(model.state_dict())`, filename from `--output`).
+
+Load with `load_clip_model(experiment_dir)` (`src/models/checkpoint.py`), which rebuilds `CLIPModel` from `hparams["model"]` (forcing `image_encoder_pretrained=False`, since the `state_dict` overwrites the ImageNet weights anyway) and returns `(model.eval(), hparams)`. `list_experiments(checkpoints_dir)` enumerates runs and flags the un-loadable ones. **A dir without `hparams.json` cannot be loaded** — the connector choice isn't recoverable from the `state_dict`; retrain it. Checkpoints from before this convention are in this state.
 
 There is no test suite, linter config, or build step in the repo.
 
@@ -44,11 +53,13 @@ Datasets are read from **local directories** passed as `dataset_path`. (An earli
 - `src/models/clip_model.py` — `CLIPModel` (a plain `nn.Module`). `forward(batch)` runs both encoders, projects each into `projection_dims`, and **returns the scalar loss directly** (not embeddings). Encoder aliases and dims are constructor args (`image_embedding_dims=2048` for resnet50, `text_embedding_dims=768` for distilbert, `projection_dims=256`).
 - `src/models/encoders/image_encoders.py` — `ImageEncoder` wraps `timm.create_model(..., num_classes=0, global_pool="avg")` to get a pooled feature vector.
 - `src/models/encoders/text_encoders.py` — `TextEncoder` wraps `transformers.AutoModel` and takes the **CLS token** (`last_hidden_state[:, 0, :]`) as the sentence embedding.
-- `src/models/embeddings_connectors/embeddings_conector.py` (filename misspelled) — three projection heads: `LinearEmbeddingsConnector`, `MLPEmbeddingsConnector` (Linear→GELU→Linear→dropout + residual + LayerNorm), and `SwiGLUEmbeddingsConnector`. **`CLIPModel` currently hardcodes `MLPEmbeddingsConnector`** for both heads; the other two are available but unwired.
+- `src/models/embeddings_connectors/embeddings_conector.py` (filename misspelled) — three projection heads, selected per-branch via `--image-connector` / `--text-connector` (`build_embeddings_connector`): `LinearEmbeddingsConnector`, `MLPEmbeddingsConnector` (Linear→GELU→Linear→dropout + residual + LayerNorm) and `SwiGLUEmbeddingsConnector`. Only the MLP head ends in a LayerNorm; with `swiglu` the embedding norm is unbounded and the (unnormalized) loss diverges — a 1-epoch flickr8k run went from loss 3.8 to 40.
 
 ### Loss
 
-`CLIPModel._compute_losses` is the distillation-style CLIP loss (à la the Moein Shariatnia / Keras CLIP tutorial), **not** the symmetric InfoNCE from the original paper: soft targets are `softmax((image_sim + text_sim)/2 * temperature)`, and image/text cross-entropy losses are averaged. Note: embeddings are **not L2-normalized** before the dot products, and `temperature` is *multiplied* into the targets but *divides* the logits — deliberate quirks of this formulation, so preserve them unless intentionally changing the loss.
+`CLIPModel._compute_losses` is the distillation-style CLIP loss (à la the Moein Shariatnia / Keras CLIP tutorial, mirrored in `notebooks/OpenAI_CLIP_simple_implementation.ipynb`), **not** the symmetric InfoNCE from the original paper: soft targets are `softmax((image_sim + text_sim)/2 * temperature)`, and image/text cross-entropy losses are averaged. Note: embeddings are **not L2-normalized** before the dot products, and `temperature` is *multiplied* into the targets but *divides* the logits — deliberate quirks of this formulation, so preserve them unless intentionally changing the loss.
+
+**Do not train with `--dropout 0`.** Because the targets are built from the embeddings themselves, "every embedding in the batch is identical" trivially satisfies the loss (uniform logits vs uniform targets) at exactly `ln(batch_size)` — 3.466 for `--batch-size 32`. Without dropout the run falls into that plateau and stays: a 4-epoch flickr8k run gave text-text cosine 0.9999 and text→image Recall@1 of 0.10%, i.e. chance. The reference notebook's `CFG.dropout = 0.1` breaks the symmetry; with it, 1 epoch reaches val loss 0.876 and Recall@1 ≈ 18%. Hence `--dropout` defaults to 0.1 in `trainer.py` and in `CLIPModel`. A collapsed checkpoint is easy to spot: the cosine between two unrelated queries' text embeddings is ~1.0.
 
 ## Known dead / orphaned code
 

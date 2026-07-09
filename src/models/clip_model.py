@@ -19,7 +19,9 @@ class CLIPModel(nn.Module):
         image_embedding_dims: Optional[int] = None,
         text_embedding_dims: Optional[int] = None,
         projection_dims: int = 256,
-        dropout: float = 0.0,
+        # Con dropout=0.0 el entrenamiento se queda en la solución degenerada de
+        # _compute_losses (todos los embeddings iguales ⇒ loss = ln(batch_size)).
+        dropout: float = 0.1,
         temperature: float = 1.0,
         image_connector: str = "mlp",
         text_connector: str = "mlp",

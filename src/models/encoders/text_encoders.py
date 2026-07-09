@@ -13,6 +13,7 @@ class TextEncoder(nn.Module):
             param.requires_grad = trainable
 
         self.target_token_idx = 0
+        self.embedding_dim = self.model.config.hidden_size
 
     def forward(self, input_ids, attention_mask):
         output = self.model(input_ids=input_ids, attention_mask=attention_mask)

@@ -1,9 +1,11 @@
+from typing import Optional
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
 from .encoders import ImageEncoder, TextEncoder
-from .embeddings_connectors.embeddings_conector import MLPEmbeddingsConnector
+from .embeddings_connectors.embeddings_conector import build_embeddings_connector
 
 
 class CLIPModel(nn.Module):
@@ -14,11 +16,13 @@ class CLIPModel(nn.Module):
         image_encoder_pretrained: bool = True,
         image_encoder_trainable: bool = True,
         text_encoder_trainable: bool = True,
-        image_embedding_dims: int = 2048,
-        text_embedding_dims: int = 768,
+        image_embedding_dims: Optional[int] = None,
+        text_embedding_dims: Optional[int] = None,
         projection_dims: int = 256,
         dropout: float = 0.0,
         temperature: float = 1.0,
+        image_connector: str = "mlp",
+        text_connector: str = "mlp",
     ) -> None:
         super().__init__()
         self.image_encoder = ImageEncoder(
@@ -29,16 +33,39 @@ class CLIPModel(nn.Module):
         self.text_encoder = TextEncoder(
             model_name=text_encoder_alias, trainable=text_encoder_trainable
         )
-        self.image_projection = MLPEmbeddingsConnector(
+
+        if image_embedding_dims is None:
+            image_embedding_dims = self.image_encoder.embedding_dim
+        if text_embedding_dims is None:
+            text_embedding_dims = self.text_encoder.embedding_dim
+
+        self.image_projection, image_out_dims = build_embeddings_connector(
+            image_connector,
             embedding_dim=image_embedding_dims,
             projection_dim=projection_dims,
             dropout=dropout,
         )
-        self.text_projection = MLPEmbeddingsConnector(
+        self.text_projection, text_out_dims = build_embeddings_connector(
+            text_connector,
             embedding_dim=text_embedding_dims,
             projection_dim=projection_dims,
             dropout=dropout,
         )
+
+        # The contrastive loss dots image against text embeddings, so both branches
+        # must land in the same space. Without a connector the encoder dim passes
+        # straight through, which rarely matches the other branch.
+        if image_out_dims != text_out_dims:
+            raise ValueError(
+                f"Image and text embeddings must share a dimension, got "
+                f"{image_out_dims} (image encoder '{image_encoder_alias}' "
+                f"[{image_embedding_dims}] + connector '{image_connector}') vs "
+                f"{text_out_dims} (text encoder '{text_encoder_alias}' "
+                f"[{text_embedding_dims}] + connector '{text_connector}'). "
+                f"With connector 'none' the encoder dimension passes through "
+                f"unchanged, so both encoders must already emit the same dimension."
+            )
+
         self.log_softmax = nn.LogSoftmax(dim=-1)
         self.temperature = temperature
 

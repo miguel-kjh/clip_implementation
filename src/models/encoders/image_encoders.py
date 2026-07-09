@@ -17,6 +17,7 @@ class ImageEncoder(nn.Module):
             param.requires_grad = trainable
 
         self.target_token_idx = 0
+        self.embedding_dim = self.model.num_features
 
     def forward(self, x):
         return self.model(x)

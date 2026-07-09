@@ -53,3 +53,34 @@ class SwiGLUEmbeddingsConnector(nn.Module):
         x = self.fc(x)
         x = self.dropout(x)
         return x
+
+
+CONNECTOR_LOOKUP = {
+    "linear": LinearEmbeddingsConnector,
+    "mlp": MLPEmbeddingsConnector,
+    "swiglu": SwiGLUEmbeddingsConnector,
+    "none": None,
+}
+
+
+def build_embeddings_connector(
+    name: str, embedding_dim: int, projection_dim: int, dropout: float
+):
+    """Construye un conector y devuelve (módulo, dimensión de salida)."""
+    key = name.lower()
+    if key not in CONNECTOR_LOOKUP:
+        raise ValueError(
+            f"Unknown embeddings connector '{name}'. "
+            f"Valid options: {', '.join(CONNECTOR_LOOKUP)}"
+        )
+
+    if key == "none":
+        return nn.Identity(), embedding_dim
+
+    if key == "linear":
+        return LinearEmbeddingsConnector(embedding_dim, projection_dim), projection_dim
+
+    connector = CONNECTOR_LOOKUP[key](
+        embedding_dim=embedding_dim, projection_dim=projection_dim, dropout=dropout
+    )
+    return connector, projection_dim

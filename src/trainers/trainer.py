@@ -12,6 +12,7 @@ from tqdm import tqdm
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from models.clip_model import CLIPModel
+from models.embeddings_connectors import CONNECTOR_LOOKUP
 from dataloaders.flickr import Flickr8kDataset, Flickr30kDataset
 
 
@@ -68,6 +69,7 @@ def build_experiment_dir(args):
 
     experiment_name = (
         f"{image_alias}_{text_alias}"
+        f"_img{args.image_connector}_txt{args.text_connector}"
         f"_bs{args.batch_size}"
         f"_ep{args.epochs}"
         f"_{args.dataset_name}"
@@ -147,6 +149,8 @@ def main():
     parser.add_argument("--val-split", type=float, default=0.2)
     parser.add_argument("--size", type=int, default=224)
     parser.add_argument("--max-length", type=int, default=200)
+    parser.add_argument("--image-connector", choices=list(CONNECTOR_LOOKUP), default="mlp")
+    parser.add_argument("--text-connector", choices=list(CONNECTOR_LOOKUP), default="mlp")
     parser.add_argument("--head-lr", type=float, default=1e-3)
     parser.add_argument("--image-encoder-lr", type=float, default=1e-4)
     parser.add_argument("--text-encoder-lr", type=float, default=1e-5)
@@ -168,7 +172,12 @@ def main():
     tokenizer = AutoTokenizer.from_pretrained(TEXT_ENCODER_ALIAS)
     train_loader, valid_loader = build_loaders(args, tokenizer)
 
-    model = CLIPModel(IMAGE_ENCODER_ALIAS, TEXT_ENCODER_ALIAS).to(device)
+    model = CLIPModel(
+        IMAGE_ENCODER_ALIAS,
+        TEXT_ENCODER_ALIAS,
+        image_connector=args.image_connector,
+        text_connector=args.text_connector,
+    ).to(device)
     params = [
         {"params": model.image_encoder.parameters(), "lr": args.image_encoder_lr},
         {"params": model.text_encoder.parameters(), "lr": args.text_encoder_lr},

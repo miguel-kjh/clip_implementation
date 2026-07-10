@@ -19,7 +19,8 @@ from dataloaders.flickr import Flickr8kDataset, Flickr30kDataset
 
 
 IMAGE_ENCODER_ALIAS = "resnet50"
-TEXT_ENCODER_ALIAS  = "distilbert-base-uncased"
+# "distilbert-base-uncased"
+TEXT_ENCODER_ALIAS  = "answerdotai/ModernBERT-base"
 
 DATASET_LOOKUP = {
     "flickr8k": Flickr8kDataset,

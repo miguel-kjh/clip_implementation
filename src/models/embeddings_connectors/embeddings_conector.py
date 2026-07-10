@@ -2,12 +2,16 @@ import torch
 from torch import nn
 
 class LinearEmbeddingsConnector(nn.Module):
-    def __init__(self, embedding_dim: int, projection_dim: int) -> None:
+    def __init__(self, embedding_dim: int, projection_dim: int, dropout: float) -> None:
         super().__init__()
         self.projection = nn.Linear(embedding_dim, projection_dim)
+        self.dropout = nn.Dropout(dropout)
+        self.layer_norm = nn.LayerNorm(projection_dim)
 
     def forward(self, x):
-        return self.projection(x)
+        x = self.projection(x)
+        x = self.dropout(x)
+        return self.layer_norm(x)
 
 
 class MLPEmbeddingsConnector(nn.Module):
@@ -34,7 +38,6 @@ class MLPEmbeddingsConnector(nn.Module):
 class SwiGLUEmbeddingsConnector(nn.Module):
     def __init__(self, embedding_dim: int, projection_dim: int, dropout: float) -> None:
         super().__init__()
-        self.layer_norm = nn.LayerNorm(embedding_dim)
 
         self.gate_proj  = nn.Linear(embedding_dim, projection_dim)   # W_gate
         self.value_proj = nn.Linear(embedding_dim, projection_dim)   # W_value
@@ -42,17 +45,16 @@ class SwiGLUEmbeddingsConnector(nn.Module):
 
         self.fc = nn.Linear(projection_dim, projection_dim)          # proyección de salida
         self.dropout = nn.Dropout(dropout)
+        self.layer_norm = nn.LayerNorm(projection_dim)
 
     def forward(self, x):
-        x = self.layer_norm(x)
-
         gate  = self.act(self.gate_proj(x))   # SiLU(W_gate · x)
         value = self.value_proj(x)            # W_value · x
 
         x = gate * value                      # producto de Hadamard
         x = self.fc(x)
         x = self.dropout(x)
-        return x
+        return self.layer_norm(x)
 
 
 CONNECTOR_LOOKUP = {
@@ -78,9 +80,9 @@ def build_embeddings_connector(
         return nn.Identity(), embedding_dim
 
     if key == "linear":
-        return LinearEmbeddingsConnector(embedding_dim, projection_dim), projection_dim
+        return LinearEmbeddingsConnector(embedding_dim, projection_dim, dropout), projection_dim
 
     connector = CONNECTOR_LOOKUP[key](
         embedding_dim=embedding_dim, projection_dim=projection_dim, dropout=dropout
     )
-    return connector, projection_dim
+    return connector, projection_dim 

@@ -1,4 +1,5 @@
 import os
+os.environ["TOKENIZERS_PARALLELISM"] = "false"
 import sys
 import argparse
 import itertools
@@ -177,7 +178,7 @@ def valid_epoch(model, valid_loader, device):
     return loss_meter
 
 
-def main():
+def main(): 
     parser = argparse.ArgumentParser(description="Train the CLIP model (pure PyTorch).")
     parser.add_argument("--dataset-name", choices=list(DATASET_LOOKUP), default="flickr8k")
     parser.add_argument("--dataset-path", default="datasets/flickr8k")

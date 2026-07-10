@@ -1,4 +1,5 @@
 import os
+
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 import sys
 import argparse
@@ -20,7 +21,7 @@ from dataloaders.flickr import Flickr8kDataset, Flickr30kDataset
 
 IMAGE_ENCODER_ALIAS = "resnet50"
 # "distilbert-base-uncased"
-TEXT_ENCODER_ALIAS  = "answerdotai/ModernBERT-base"
+TEXT_ENCODER_ALIAS  = "distilbert-base-uncased"
 
 DATASET_LOOKUP = {
     "flickr8k": Flickr8kDataset,
@@ -75,6 +76,7 @@ def build_experiment_dir(args):
         f"_img{args.image_connector}_txt{args.text_connector}"
         f"_bs{args.batch_size}"
         f"_ep{args.epochs}"
+        f"_img_trainable{args.image_encoder_trainable}_txt_trainable{args.text_encoder_trainable}"
         f"_{args.dataset_name}"
         f"_{timestamp}"
     )
@@ -94,6 +96,8 @@ def build_model_hparams(args):
         "projection_dims": args.projection_dims,
         "dropout": args.dropout,
         "temperature": args.temperature,
+        "image_encoder_trainable": args.image_encoder_trainable,
+        "text_encoder_trainable": args.text_encoder_trainable,
     }
 
 
@@ -191,6 +195,8 @@ def main():
     parser.add_argument("--max-length", type=int, default=200)
     parser.add_argument("--image-connector", choices=list(CONNECTOR_LOOKUP), default="mlp")
     parser.add_argument("--text-connector", choices=list(CONNECTOR_LOOKUP), default="mlp")
+    parser.add_argument("--image_encoder_trainable", action="store_true", help="Make the image encoder trainable") 
+    parser.add_argument("--text_encoder_trainable", action="store_true", help="Make the text encoder trainable")
     parser.add_argument("--projection-dims", type=int, default=256)
     # Ojo: con dropout=0 los embeddings colapsan (loss se clava en ln(batch_size)).
     parser.add_argument("--dropout", type=float, default=0.1)

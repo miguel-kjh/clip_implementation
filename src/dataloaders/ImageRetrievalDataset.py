@@ -40,8 +40,8 @@ class ImageRetrievalDataset(Dataset):
         )
         self.transforms = A.Compose(
             [
-                A.Resize(target_size, target_size, always_apply=True),
-                A.Normalize(max_pixel_value=255.0, always_apply=True),
+                A.Resize(target_size, target_size),
+                A.Normalize(max_pixel_value=255.0),
             ]
         )
 

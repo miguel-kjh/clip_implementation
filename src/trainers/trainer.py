@@ -21,12 +21,22 @@ from dataloaders.flickr import Flickr8kDataset, Flickr30kDataset
 
 IMAGE_ENCODER_ALIAS = "resnet50"
 # "distilbert-base-uncased"
-TEXT_ENCODER_ALIAS  = "distilbert-base-uncased"
+TEXT_ENCODER_ALIAS  = "sentence-transformers/all-mpnet-base-v2"
 
 DATASET_LOOKUP = {
     "flickr8k": Flickr8kDataset,
     "flickr30k": Flickr30kDataset,
 }
+
+def build_tokenizer(model_name):
+    """Tokenizer del encoder de texto. Los tokenizers decoder-only (GPT) no traen
+    `pad_token`, y el dataset tokeniza con `padding=True`, así que hace falta un
+    fallback al `eos_token`."""
+    tokenizer = AutoTokenizer.from_pretrained(model_name)
+    if tokenizer.pad_token is None:
+        tokenizer.pad_token = tokenizer.eos_token
+    return tokenizer
+
 
 def seed_everything(seed=42):
     import random
@@ -98,6 +108,7 @@ def build_model_hparams(args):
         "temperature": args.temperature,
         "image_encoder_trainable": args.image_encoder_trainable,
         "text_encoder_trainable": args.text_encoder_trainable,
+        "text_encoder_pooling": args.text_encoder_pooling,
     }
 
 
@@ -197,6 +208,13 @@ def main():
     parser.add_argument("--text-connector", choices=list(CONNECTOR_LOOKUP), default="mlp")
     parser.add_argument("--image_encoder_trainable", action="store_true", help="Make the image encoder trainable") 
     parser.add_argument("--text_encoder_trainable", action="store_true", help="Make the text encoder trainable")
+    parser.add_argument(
+        "--text-encoder-pooling",
+        choices=["auto", "cls", "mean", "last"],
+        default="auto",
+        help="Pooling del encoder de texto. 'auto' lo deriva del modelo "
+        "(cls para BERT, last para GPT, mean para sentence-transformers).",
+    )
     parser.add_argument("--projection-dims", type=int, default=256)
     # Ojo: con dropout=0 los embeddings colapsan (loss se clava en ln(batch_size)).
     parser.add_argument("--dropout", type=float, default=0.1)
@@ -223,7 +241,7 @@ def main():
     # Al empezar, no al terminar: así un run interrumpido sigue siendo legible.
     save_hparams(experiment_dir, build_hparams(args, model_hparams))
 
-    tokenizer = AutoTokenizer.from_pretrained(TEXT_ENCODER_ALIAS)
+    tokenizer = build_tokenizer(TEXT_ENCODER_ALIAS)
     train_loader, valid_loader = build_loaders(args, tokenizer)
 
     model = CLIPModel(**model_hparams).to(device)

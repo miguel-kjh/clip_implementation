@@ -16,6 +16,7 @@ class CLIPModel(nn.Module):
         image_encoder_pretrained: bool = True,
         image_encoder_trainable: bool = True,
         text_encoder_trainable: bool = True,
+        text_encoder_pooling: str = "auto",
         image_embedding_dims: Optional[int] = None,
         text_embedding_dims: Optional[int] = None,
         projection_dims: int = 256,
@@ -33,7 +34,9 @@ class CLIPModel(nn.Module):
             trainable=image_encoder_trainable,
         )
         self.text_encoder = TextEncoder(
-            model_name=text_encoder_alias, trainable=text_encoder_trainable
+            model_name=text_encoder_alias,
+            trainable=text_encoder_trainable,
+            pooling=text_encoder_pooling,
         )
 
         if image_embedding_dims is None:

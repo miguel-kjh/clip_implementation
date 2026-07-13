@@ -11,13 +11,12 @@ import os
 import sys
 
 import torch
-from transformers import AutoTokenizer
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from models.checkpoint import load_clip_model, load_hparams
 from models.clip_model import CLIPModel
-from trainers.trainer import DATASET_LOOKUP, seed_everything
+from trainers.trainer import DATASET_LOOKUP, build_tokenizer, seed_everything
 
 from eval.collapse import alignment, collapse_metrics, modality_gap
 from eval.embeddings import encode_subset
@@ -238,7 +237,7 @@ def main():
     val_split = hparams["data"]["val_split"]
     projection_dims = hparams["model"]["projection_dims"]
 
-    tokenizer = AutoTokenizer.from_pretrained(hparams["model"]["text_encoder_alias"])
+    tokenizer = build_tokenizer(hparams["model"]["text_encoder_alias"])
     # Réplica del orden del trainer: sembrar, construir el dataset y solo entonces
     # partir. `reproduce_val_indices` depende de que nada consuma el RNG entre medias.
     seed_everything(seed)
